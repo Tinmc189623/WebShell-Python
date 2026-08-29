@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 set -e
 
-# ---------- Language detection ----------
+# ===================== VERSION =====================
+SCRIPT_VERSION="1.0.0"
+REPO_OWNER="Tinmc189623"
+REPO_NAME="WebShell-Python"
+REPO_BRANCH="main"
+GITHUB_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
+
+# ===================== LANGUAGE DETECTION =====================
 detect_lang() {
-    # Get system language from LANG, fallback to en_US
     local lang="${LANG:-en_US.UTF-8}"
     case "$lang" in
         zh_CN*|zh_SG*|zh_HK*|zh_TW*|zh_* )
@@ -17,7 +23,7 @@ detect_lang() {
 
 LANG_CODE=$(detect_lang)
 
-# ---------- Message catalog ----------
+# ===================== MESSAGES =====================
 if [ "$LANG_CODE" = "zh" ]; then
     MSG_PROJECT_DIR="📁 项目根目录"
     MSG_CHECK_UV="🔧 检查 uv..."
@@ -31,6 +37,15 @@ if [ "$LANG_CODE" = "zh" ]; then
     MSG_STOP="🛑 停止服务"
     MSG_FAIL="❌ 启动失败，请查看"
     MSG_NO_UV="uv 未安装，正在尝试安装..."
+    MSG_CHECK_UPDATE="🔍 检查更新..."
+    MSG_UPDATE_AVAIL="🆕 发现新版本"
+    MSG_CURRENT_VER="当前版本"
+    MSG_LATEST_VER="最新版本"
+    MSG_UPDATE_ASK="是否立即更新？(y/N)"
+    MSG_UPDATING="⏳ 正在更新..."
+    MSG_UPDATE_OK="✅ 更新成功！正在重新启动..."
+    MSG_UPDATE_FAIL="❌ 更新失败"
+    MSG_NO_UPDATE="✅ 已是最新版本"
 else
     MSG_PROJECT_DIR="📁 Project root"
     MSG_CHECK_UV="🔧 Checking uv..."
@@ -44,16 +59,115 @@ else
     MSG_STOP="🛑 To stop"
     MSG_FAIL="❌ Failed to start, check"
     MSG_NO_UV="uv not found, attempting to install..."
+    MSG_CHECK_UPDATE="🔍 Checking for updates..."
+    MSG_UPDATE_AVAIL="🆕 New version available"
+    MSG_CURRENT_VER="Current version"
+    MSG_LATEST_VER="Latest version"
+    MSG_UPDATE_ASK="Update now? (y/N)"
+    MSG_UPDATING="⏳ Updating..."
+    MSG_UPDATE_OK="✅ Update successful! Restarting..."
+    MSG_UPDATE_FAIL="❌ Update failed"
+    MSG_NO_UPDATE="✅ Already up to date"
 fi
 
-# ---------- Main script ----------
+# ===================== UPDATE FUNCTIONS =====================
+fetch_url() {
+    local url="$1"
+    if command -v curl &>/dev/null; then
+        curl -fsSL "$url" 2>/dev/null
+    elif command -v wget &>/dev/null; then
+        wget -qO- "$url" 2>/dev/null
+    elif command -v python3 &>/dev/null; then
+        python3 -c "import urllib.request, sys; sys.stdout.write(urllib.request.urlopen('$url').read().decode())" 2>/dev/null
+    else
+        echo ""
+    fi
+}
+
+check_for_updates() {
+    echo "$MSG_CHECK_UPDATE"
+    local remote_version
+    remote_version=$(fetch_url "${GITHUB_RAW}/version.txt" | tr -d '\n\r')
+    if [ -z "$remote_version" ]; then
+        # If version.txt not found, try to get version from script itself (fallback)
+        remote_version=$(fetch_url "${GITHUB_RAW}/start.sh" | grep -m1 '^SCRIPT_VERSION=' | sed 's/^SCRIPT_VERSION="//;s/".*//')
+    fi
+    if [ -z "$remote_version" ]; then
+        echo "⚠️  ${MSG_UPDATE_FAIL}: cannot fetch remote version"
+        return 1
+    fi
+    if [ "$remote_version" != "$SCRIPT_VERSION" ]; then
+        echo "$MSG_UPDATE_AVAIL"
+        echo "  $MSG_CURRENT_VER: $SCRIPT_VERSION"
+        echo "  $MSG_LATEST_VER: $remote_version"
+        read -p "$MSG_UPDATE_ASK " -r
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            perform_update "$remote_version"
+        else
+            echo "⏭️  ${MSG_UPDATE_ASK} declined"
+        fi
+    else
+        echo "$MSG_NO_UPDATE"
+    fi
+}
+
+perform_update() {
+    local new_version="$1"
+    echo "$MSG_UPDATING"
+    local tmp_script
+    tmp_script=$(mktemp /tmp/update_webshell.XXXXXX)
+    chmod +x "$tmp_script"
+
+    # Write the updater script
+    cat > "$tmp_script" <<'EOFUPD'
+#!/bin/bash
+# This script updates the original start.sh and then re-executes it
+NEW_SCRIPT="$1"
+TARGET_SCRIPT="$2"
+if [ -z "$NEW_SCRIPT" ] || [ -z "$TARGET_SCRIPT" ]; then
+    echo "Usage: $0 <new_script_path> <target_script_path>"
+    exit 1
+fi
+# Wait a moment to ensure the parent process has exited
+sleep 1
+# Replace the target script with the new one
+cp -f "$NEW_SCRIPT" "$TARGET_SCRIPT"
+chmod +x "$TARGET_SCRIPT"
+# Clean up the temporary new script
+rm -f "$NEW_SCRIPT"
+# Re-execute the updated script
+exec "$TARGET_SCRIPT"
+EOFUPD
+
+    # Download the new script to a temporary file
+    local new_script_file
+    new_script_file=$(mktemp /tmp/new_start.XXXXXX)
+    if ! fetch_url "${GITHUB_RAW}/start.sh" > "$new_script_file"; then
+        echo "❌ ${MSG_UPDATE_FAIL}: cannot download new script"
+        rm -f "$tmp_script" "$new_script_file"
+        return 1
+    fi
+    chmod +x "$new_script_file"
+
+    # Execute the updater, which will replace this script and restart
+    exec "$tmp_script" "$new_script_file" "$0"
+    # exec replaces the current process, so the lines below are never reached
+}
+
+# ===================== MAIN SCRIPT =====================
+
+# Check for updates (skip if --no-update is passed)
+if [[ "$1" != "--no-update" ]]; then
+    check_for_updates
+fi
+
+# ---------- Continue with normal execution ----------
 PROJECT_DIR="$(pwd)"
 echo "$MSG_PROJECT_DIR: $PROJECT_DIR"
 
 echo "$MSG_CHECK_UV"
 if ! command -v uv &> /dev/null; then
     echo "$MSG_NO_UV"
-    # Try pacman (Arch), then pip (fallback)
     if command -v pacman &> /dev/null; then
         sudo pacman -S --noconfirm uv || pip install uv --user
     else
@@ -63,7 +177,7 @@ fi
 
 echo "$MSG_GENERATING"
 
-# Write pyproject.toml
+# ---------- Write pyproject.toml ----------
 cat > pyproject.toml <<'EOF'
 [project]
 name = "webshell"
@@ -77,7 +191,7 @@ dependencies = [
 requires-python = ">=3.8"
 EOF
 
-# Write app.py
+# ---------- Write app.py ----------
 cat > app.py <<'EOF'
 import os
 from flask import Flask, render_template
@@ -104,13 +218,13 @@ if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
 EOF
 
-# Create routes/__init__.py
+# ---------- routes/ directory ----------
 mkdir -p routes
+
 cat > routes/__init__.py <<'EOF'
 # Empty file to mark package
 EOF
 
-# Write routes/terminal.py
 cat > routes/terminal.py <<'EOF'
 import os, pty, subprocess, threading, time
 from flask import request
@@ -158,7 +272,6 @@ def register_socketio_handlers(socketio):
             del shell_processes[sid]
 EOF
 
-# Write routes/system.py
 cat > routes/system.py <<'EOF'
 from flask import Blueprint, jsonify
 import psutil
@@ -177,7 +290,6 @@ def system():
     return jsonify(data)
 EOF
 
-# Write routes/processes.py
 cat > routes/processes.py <<'EOF'
 from flask import Blueprint, jsonify
 import psutil
@@ -195,7 +307,6 @@ def process():
     return jsonify(procs)
 EOF
 
-# Write routes/files.py
 cat > routes/files.py <<'EOF'
 from flask import Blueprint, jsonify, request
 import os
@@ -214,7 +325,6 @@ def files():
     return jsonify({'path': path, 'files': items})
 EOF
 
-# Write routes/logs.py
 cat > routes/logs.py <<'EOF'
 from flask import Blueprint, jsonify, request
 import os
@@ -233,7 +343,7 @@ def tail():
         return jsonify({'error': str(e)}), 500
 EOF
 
-# Create templates directory and all HTML files
+# ---------- templates/ directory ----------
 mkdir -p templates
 
 cat > templates/base.html <<'EOF'
@@ -295,85 +405,87 @@ cat > templates/base.html <<'EOF'
 <script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-// Navigation
-document.querySelectorAll('.sidebar .nav-link').forEach(link => {
-  link.addEventListener('click', function() {
-    document.querySelectorAll('.sidebar .nav-link').forEach(l => l.classList.remove('active'));
-    this.classList.add('active');
-    const section = this.dataset.section;
-    document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
-    document.getElementById('section-'+section).style.display = 'block';
-    if (section === 'terminal') setTimeout(() => term && term.resize(term.cols, term.rows), 100);
-    if (section === 'system') refreshStats();
-    if (section === 'processes') refreshProcesses();
-    if (section === 'files') loadFiles();
-  });
+document.addEventListener('DOMContentLoaded', function() {
+    const socket = io();
+    const term = new Terminal({ cursorBlink: true, theme: { background: '#0d1117', foreground: '#e6edf3' } });
+    term.open(document.getElementById('terminal'));
+    term.focus();
+
+    socket.on('shell_ready', (msg) => term.writeln('\x1b[32m' + msg.status + '\x1b[0m'));
+    socket.on('shell_output', (data) => term.write(data.data));
+    term.onData((data) => socket.emit('shell_input', { data: data }));
+    socket.on('disconnect', () => term.writeln('\x1b[31mDisconnected\x1b[0m'));
+
+    document.querySelectorAll('.sidebar .nav-link').forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            document.querySelectorAll('.sidebar .nav-link').forEach(l => l.classList.remove('active'));
+            this.classList.add('active');
+            const section = this.dataset.section;
+            document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
+            const target = document.getElementById('section-' + section);
+            if (target) target.style.display = 'block';
+            if (section === 'terminal') setTimeout(() => term.resize(term.cols, term.rows), 100);
+            if (section === 'system') refreshStats();
+            if (section === 'processes') refreshProcesses();
+            if (section === 'files') loadFiles();
+        });
+    });
+
+    function loadFiles(path = '.') {
+        fetch(`/api/files?path=${encodeURIComponent(path)}`)
+            .then(r => r.json())
+            .then(data => {
+                const ul = document.getElementById('file-list');
+                if (data.error) { ul.innerHTML = `<li class="text-danger">${data.error}</li>`; return; }
+                document.getElementById('current-path').textContent = data.path;
+                ul.innerHTML = '';
+                data.files.forEach(f => {
+                    const li = document.createElement('li');
+                    li.className = f.type === 'dir' ? 'dir' : 'file';
+                    li.innerHTML = `<i class="bi ${f.type === 'dir' ? 'bi-folder-fill' : 'bi-file-earmark'} me-2"></i>${f.name}`;
+                    if (f.type === 'dir') li.addEventListener('click', () => loadFiles(data.path + '/' + f.name));
+                    ul.appendChild(li);
+                });
+            });
+    }
+    document.querySelector('[data-section="files"]').addEventListener('click', function(e) {
+        if (!document.getElementById('file-list').children.length) loadFiles();
+    });
+
+    document.getElementById('load-log').addEventListener('click', function() {
+        const path = document.getElementById('log-path').value;
+        fetch(`/api/tail?file=${encodeURIComponent(path)}`)
+            .then(r => r.json())
+            .then(data => {
+                const el = document.getElementById('log-content');
+                el.textContent = data.error ? 'Error: ' + data.error : data.content;
+            });
+    });
+
+    function refreshStats() {
+        fetch('/api/system')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('cpu').textContent = data.cpu + '%';
+                document.getElementById('mem').textContent = Math.round((data.memory.used / data.memory.total) * 100) + '%';
+                document.getElementById('disk').textContent = Math.round((data.disk.used / data.disk.total) * 100) + '%';
+                document.getElementById('uptime').textContent = Math.floor(data.uptime / 3600) + 'h';
+            });
+    }
+    document.getElementById('refresh-stats').addEventListener('click', refreshStats);
+
+    function refreshProcesses() {
+        fetch('/api/process')
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('process-table');
+                tbody.innerHTML = data.map(p => `<tr><td>${p.pid}</td><td>${p.name}</td><td>${p.cpu}</td></tr>`).join('');
+            });
+    }
+
+    window.addEventListener('resize', () => term.resize(term.cols, term.rows));
 });
-
-// Terminal
-const socket = io();
-const term = new Terminal({ cursorBlink: true, theme: { background: '#0d1117', foreground: '#e6edf3' } });
-term.open(document.getElementById('terminal'));
-term.focus();
-socket.on('shell_ready', (msg) => term.writeln('\x1b[32m' + msg.status + '\x1b[0m'));
-socket.on('shell_output', (data) => term.write(data.data));
-term.onData((data) => socket.emit('shell_input', { data: data }));
-socket.on('disconnect', () => term.writeln('\x1b[31mDisconnected\x1b[0m'));
-
-// Files
-function loadFiles(path = '.') {
-  fetch(`/api/files?path=${encodeURIComponent(path)}`)
-    .then(r => r.json())
-    .then(data => {
-      const ul = document.getElementById('file-list');
-      if (data.error) { ul.innerHTML = `<li class="text-danger">${data.error}</li>`; return; }
-      document.getElementById('current-path').textContent = data.path;
-      ul.innerHTML = '';
-      data.files.forEach(f => {
-        const li = document.createElement('li');
-        li.className = f.type === 'dir' ? 'dir' : 'file';
-        li.innerHTML = `<i class="bi ${f.type === 'dir' ? 'bi-folder-fill' : 'bi-file-earmark'} me-2"></i>${f.name}`;
-        if (f.type === 'dir') li.addEventListener('click', () => loadFiles(data.path + '/' + f.name));
-        ul.appendChild(li);
-      });
-    });
-}
-
-// Logs
-document.getElementById('load-log').addEventListener('click', function() {
-  const path = document.getElementById('log-path').value;
-  fetch(`/api/tail?file=${encodeURIComponent(path)}`)
-    .then(r => r.json())
-    .then(data => {
-      const el = document.getElementById('log-content');
-      el.textContent = data.error ? 'Error: ' + data.error : data.content;
-    });
-});
-
-// System
-function refreshStats() {
-  fetch('/api/system')
-    .then(r => r.json())
-    .then(data => {
-      document.getElementById('cpu').textContent = data.cpu + '%';
-      document.getElementById('mem').textContent = Math.round((data.memory.used / data.memory.total) * 100) + '%';
-      document.getElementById('disk').textContent = Math.round((data.disk.used / data.disk.total) * 100) + '%';
-      document.getElementById('uptime').textContent = Math.floor(data.uptime / 3600) + 'h';
-    });
-}
-document.getElementById('refresh-stats').addEventListener('click', refreshStats);
-
-// Processes
-function refreshProcesses() {
-  fetch('/api/process')
-    .then(r => r.json())
-    .then(data => {
-      const tbody = document.getElementById('process-table');
-      tbody.innerHTML = data.map(p => `<tr><td>${p.pid}</td><td>${p.name}</td><td>${p.cpu}</td></tr>`).join('');
-    });
-}
-
-window.addEventListener('resize', () => term.resize(term.cols, term.rows));
 </script>
 </body>
 </html>
@@ -453,12 +565,10 @@ uv sync
 echo "$MSG_STARTING"
 nohup uv run python app.py > server.log 2>&1 &
 SERVICE_PID=$!
-sleep 2
+sleep 3
 
 if ps -p $SERVICE_PID > /dev/null; then
-    # Get IP using ip command (more reliable than hostname)
     IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -1)
-    # If no IP found, fallback to localhost
     if [ -z "$IP" ]; then
         IP="127.0.0.1"
     fi
@@ -467,6 +577,9 @@ if ps -p $SERVICE_PID > /dev/null; then
     echo "$MSG_ACCESS: http://${IP}:5000"
     echo "$MSG_LOG: ${PROJECT_DIR}/server.log"
     echo "$MSG_STOP: kill $SERVICE_PID"
+    echo ""
+    echo "如果浏览器打开后终端区域空白，请按 F12 查看 Console 是否有报错。"
+    echo "常见问题：若 WebSocket 连接失败，请检查防火墙是否允许 5000 端口。"
 else
     echo "$MSG_FAIL ${PROJECT_DIR}/server.log"
     exit 1
