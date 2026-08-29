@@ -1,22 +1,72 @@
 #!/usr/bin/env bash
 set -e
 
-PROJECT_DIR="${HOME}/devconsole"
-mkdir -p "$PROJECT_DIR"
-cd "$PROJECT_DIR"
+# ---------- Language detection ----------
+detect_lang() {
+    # Get system language from LANG, fallback to en_US
+    local lang="${LANG:-en_US.UTF-8}"
+    case "$lang" in
+        zh_CN*|zh_SG*|zh_HK*|zh_TW*|zh_* )
+            echo "zh"
+            ;;
+        *)
+            echo "en"
+            ;;
+    esac
+}
 
-echo "🔧 Checking uv..."
-if ! command -v uv &> /dev/null; then
-    echo "📦 Installing uv..."
-    sudo pacman -S --noconfirm uv || pip install uv --user
+LANG_CODE=$(detect_lang)
+
+# ---------- Message catalog ----------
+if [ "$LANG_CODE" = "zh" ]; then
+    MSG_PROJECT_DIR="📁 项目根目录"
+    MSG_CHECK_UV="🔧 检查 uv..."
+    MSG_INSTALL_UV="📦 正在安装 uv..."
+    MSG_GENERATING="📁 生成项目文件..."
+    MSG_INSTALL_DEPS="📦 正在安装依赖 (uv sync)..."
+    MSG_STARTING="🚀 启动服务..."
+    MSG_SUCCESS="✅ 服务启动成功！"
+    MSG_ACCESS="🌐 访问地址"
+    MSG_LOG="📄 日志文件"
+    MSG_STOP="🛑 停止服务"
+    MSG_FAIL="❌ 启动失败，请查看"
+    MSG_NO_UV="uv 未安装，正在尝试安装..."
+else
+    MSG_PROJECT_DIR="📁 Project root"
+    MSG_CHECK_UV="🔧 Checking uv..."
+    MSG_INSTALL_UV="📦 Installing uv..."
+    MSG_GENERATING="📁 Generating project files..."
+    MSG_INSTALL_DEPS="📦 Installing dependencies (uv sync)..."
+    MSG_STARTING="🚀 Starting service..."
+    MSG_SUCCESS="✅ Service started successfully!"
+    MSG_ACCESS="🌐 Access URL"
+    MSG_LOG="📄 Log file"
+    MSG_STOP="🛑 To stop"
+    MSG_FAIL="❌ Failed to start, check"
+    MSG_NO_UV="uv not found, attempting to install..."
 fi
 
-echo "📁 Generating project files..."
+# ---------- Main script ----------
+PROJECT_DIR="$(pwd)"
+echo "$MSG_PROJECT_DIR: $PROJECT_DIR"
 
-# ===== pyproject.toml =====
+echo "$MSG_CHECK_UV"
+if ! command -v uv &> /dev/null; then
+    echo "$MSG_NO_UV"
+    # Try pacman (Arch), then pip (fallback)
+    if command -v pacman &> /dev/null; then
+        sudo pacman -S --noconfirm uv || pip install uv --user
+    else
+        pip install uv --user
+    fi
+fi
+
+echo "$MSG_GENERATING"
+
+# Write pyproject.toml
 cat > pyproject.toml <<'EOF'
 [project]
-name = "devconsole"
+name = "webshell"
 version = "0.1.0"
 dependencies = [
     "flask>=3.0.0",
@@ -27,7 +77,7 @@ dependencies = [
 requires-python = ">=3.8"
 EOF
 
-# ===== app.py =====
+# Write app.py
 cat > app.py <<'EOF'
 import os
 from flask import Flask, render_template
@@ -54,13 +104,13 @@ if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
 EOF
 
-# ===== routes/__init__.py =====
+# Create routes/__init__.py
 mkdir -p routes
 cat > routes/__init__.py <<'EOF'
-# Empty file to mark as package
+# Empty file to mark package
 EOF
 
-# ===== routes/terminal.py =====
+# Write routes/terminal.py
 cat > routes/terminal.py <<'EOF'
 import os, pty, subprocess, threading, time
 from flask import request
@@ -108,7 +158,7 @@ def register_socketio_handlers(socketio):
             del shell_processes[sid]
 EOF
 
-# ===== routes/system.py =====
+# Write routes/system.py
 cat > routes/system.py <<'EOF'
 from flask import Blueprint, jsonify
 import psutil
@@ -127,7 +177,7 @@ def system():
     return jsonify(data)
 EOF
 
-# ===== routes/processes.py =====
+# Write routes/processes.py
 cat > routes/processes.py <<'EOF'
 from flask import Blueprint, jsonify
 import psutil
@@ -145,7 +195,7 @@ def process():
     return jsonify(procs)
 EOF
 
-# ===== routes/files.py =====
+# Write routes/files.py
 cat > routes/files.py <<'EOF'
 from flask import Blueprint, jsonify, request
 import os
@@ -164,7 +214,7 @@ def files():
     return jsonify({'path': path, 'files': items})
 EOF
 
-# ===== routes/logs.py =====
+# Write routes/logs.py
 cat > routes/logs.py <<'EOF'
 from flask import Blueprint, jsonify, request
 import os
@@ -183,8 +233,9 @@ def tail():
         return jsonify({'error': str(e)}), 500
 EOF
 
-# ===== templates/base.html =====
+# Create templates directory and all HTML files
 mkdir -p templates
+
 cat > templates/base.html <<'EOF'
 <!DOCTYPE html>
 <html lang="en">
@@ -328,7 +379,6 @@ window.addEventListener('resize', () => term.resize(term.cols, term.rows));
 </html>
 EOF
 
-# ===== templates/index.html =====
 cat > templates/index.html <<'EOF'
 {% extends "base.html" %}
 {% block content %}
@@ -340,7 +390,6 @@ cat > templates/index.html <<'EOF'
 {% endblock %}
 EOF
 
-# ===== templates/terminal.html =====
 cat > templates/terminal.html <<'EOF'
 <div class="card">
   <div class="card-header"><i class="bi bi-console me-2"></i>Interactive Shell</div>
@@ -348,7 +397,6 @@ cat > templates/terminal.html <<'EOF'
 </div>
 EOF
 
-# ===== templates/files.html =====
 cat > templates/files.html <<'EOF'
 <div class="card">
   <div class="card-header"><i class="bi bi-folder2-open me-2"></i>File Browser <span id="current-path" class="ms-3 badge bg-secondary">/</span></div>
@@ -356,7 +404,6 @@ cat > templates/files.html <<'EOF'
 </div>
 EOF
 
-# ===== templates/logs.html =====
 cat > templates/logs.html <<'EOF'
 <div class="card">
   <div class="card-header"><i class="bi bi-file-text me-2"></i>Log Viewer <span class="badge badge-tail">tail -f</span></div>
@@ -370,7 +417,6 @@ cat > templates/logs.html <<'EOF'
 </div>
 EOF
 
-# ===== templates/system.html =====
 cat > templates/system.html <<'EOF'
 <div class="card">
   <div class="card-header"><i class="bi bi-speedometer2 me-2"></i>System Dashboard</div>
@@ -386,7 +432,6 @@ cat > templates/system.html <<'EOF'
 </div>
 EOF
 
-# ===== templates/processes.html =====
 cat > templates/processes.html <<'EOF'
 <div class="card">
   <div class="card-header"><i class="bi bi-hdd-stack me-2"></i>Process List</div>
@@ -401,22 +446,28 @@ cat > templates/processes.html <<'EOF'
 </div>
 EOF
 
-echo "📦 Installing dependencies with uv..."
+# ---------- Install dependencies and start ----------
+echo "$MSG_INSTALL_DEPS"
 uv sync
 
-echo "🚀 Starting service in background..."
+echo "$MSG_STARTING"
 nohup uv run python app.py > server.log 2>&1 &
 SERVICE_PID=$!
 sleep 2
 
 if ps -p $SERVICE_PID > /dev/null; then
-    IP=$(hostname -I | awk '{print $1}')
+    # Get IP using ip command (more reliable than hostname)
+    IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -1)
+    # If no IP found, fallback to localhost
+    if [ -z "$IP" ]; then
+        IP="127.0.0.1"
+    fi
     echo ""
-    echo "✅ Service started successfully!"
-    echo "🌐 Access your web console at: http://$IP:5000"
-    echo "📄 Log file: $PROJECT_DIR/server.log"
-    echo "🛑 To stop: kill $SERVICE_PID"
+    echo "$MSG_SUCCESS"
+    echo "$MSG_ACCESS: http://${IP}:5000"
+    echo "$MSG_LOG: ${PROJECT_DIR}/server.log"
+    echo "$MSG_STOP: kill $SERVICE_PID"
 else
-    echo "❌ Failed to start service. Check $PROJECT_DIR/server.log"
+    echo "$MSG_FAIL ${PROJECT_DIR}/server.log"
     exit 1
 fi
