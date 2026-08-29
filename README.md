@@ -146,7 +146,7 @@ MIT License © 2026
 
 ## 📞 联系方式
 
-- 项目地址：[https://github.com/your-repo/devconsole](https://github.com/Tinmc189623/WebShell-Python/)
+- 项目地址：[https://github.com/Tinmc189623/WebShell-Python](https://github.com/Tinmc189623/WebShell-Python/)
 
 ---
 
