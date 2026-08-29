@@ -2,7 +2,7 @@
 set -e
 
 # ===================== VERSION =====================
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="0.2.0"
 REPO_OWNER="Tinmc189623"
 REPO_NAME="WebShell-Python"
 REPO_BRANCH="main"
@@ -46,6 +46,7 @@ if [ "$LANG_CODE" = "zh" ]; then
     MSG_UPDATE_OK="✅ 更新成功！正在重新启动..."
     MSG_UPDATE_FAIL="❌ 更新失败"
     MSG_NO_UPDATE="✅ 已是最新版本"
+    MSG_SKIP_UPDATE="⏭️  跳过更新"
 else
     MSG_PROJECT_DIR="📁 Project root"
     MSG_CHECK_UV="🔧 Checking uv..."
@@ -68,6 +69,7 @@ else
     MSG_UPDATE_OK="✅ Update successful! Restarting..."
     MSG_UPDATE_FAIL="❌ Update failed"
     MSG_NO_UPDATE="✅ Already up to date"
+    MSG_SKIP_UPDATE="⏭️  Update skipped"
 fi
 
 # ===================== UPDATE FUNCTIONS =====================
@@ -89,12 +91,12 @@ check_for_updates() {
     local remote_version
     remote_version=$(fetch_url "${GITHUB_RAW}/version.txt" | tr -d '\n\r')
     if [ -z "$remote_version" ]; then
-        # If version.txt not found, try to get version from script itself (fallback)
+        # Fallback: extract version from remote start.sh
         remote_version=$(fetch_url "${GITHUB_RAW}/start.sh" | grep -m1 '^SCRIPT_VERSION=' | sed 's/^SCRIPT_VERSION="//;s/".*//')
     fi
     if [ -z "$remote_version" ]; then
-        echo "⚠️  ${MSG_UPDATE_FAIL}: cannot fetch remote version"
-        return 1
+        echo "⚠️  ${MSG_UPDATE_FAIL}: cannot fetch remote version, skipping update check"
+        return 0   # 返回 0，避免触发 set -e 退出脚本
     fi
     if [ "$remote_version" != "$SCRIPT_VERSION" ]; then
         echo "$MSG_UPDATE_AVAIL"
@@ -104,11 +106,12 @@ check_for_updates() {
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             perform_update "$remote_version"
         else
-            echo "⏭️  ${MSG_UPDATE_ASK} declined"
+            echo "$MSG_SKIP_UPDATE"
         fi
     else
         echo "$MSG_NO_UPDATE"
     fi
+    return 0  # 确保总是返回 0，不中断脚本
 }
 
 perform_update() {
@@ -128,14 +131,10 @@ if [ -z "$NEW_SCRIPT" ] || [ -z "$TARGET_SCRIPT" ]; then
     echo "Usage: $0 <new_script_path> <target_script_path>"
     exit 1
 fi
-# Wait a moment to ensure the parent process has exited
 sleep 1
-# Replace the target script with the new one
 cp -f "$NEW_SCRIPT" "$TARGET_SCRIPT"
 chmod +x "$TARGET_SCRIPT"
-# Clean up the temporary new script
 rm -f "$NEW_SCRIPT"
-# Re-execute the updated script
 exec "$TARGET_SCRIPT"
 EOFUPD
 
