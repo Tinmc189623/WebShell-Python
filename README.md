@@ -1,4 +1,4 @@
-# DevOps Web Console
+# WebShell-Python
 
 一个基于 **Python + Flask + WebSocket** 构建的轻量级服务器管理面板，通过浏览器提供交互式终端、文件浏览、日志查看、系统监控和进程管理等功能。专为内网运维场景设计，无需安装任何客户端，开箱即用。
 
