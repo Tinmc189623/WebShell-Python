@@ -29,7 +29,7 @@
 复制以下命令到服务器终端执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-repo/devconsole/main/start.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Tinmc189623/WebShell-Python/main/start.sh | bash
 ```
 
 或手动保存 `start.sh` 并运行：
@@ -51,8 +51,8 @@ chmod +x start.sh
 若需自定义配置，可按以下步骤操作：
 
 ```bash
-git clone https://github.com/your-repo/devconsole.git
-cd devconsole
+git clone https://github.com/Tinmc189623/WebShell-Python.git
+cd WebShell-Python
 uv sync
 uv run python app.py
 ```
